@@ -1,0 +1,71 @@
+name: Build SELinux AVC Bypass KPM
+
+on:
+  push:
+    paths:
+      - ".github/workflows/build.yml"
+      - "**.c"
+      - "**.h"
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Push a new release'
+        required: false
+        default: 'false'
+      version:
+        description: 'Release version'
+        required: false
+        default: '1.0.0'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TZ: UTC-8
+
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 1
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27b
+
+      - name: Build KPM module
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: make
+
+      - name: Verify build output
+        run: |
+          file selinux_avc_bypass_*.kpm
+          ls -lh selinux_avc_bypass_*.kpm
+
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selinux_avc_bypass_kpm
+          path: selinux_avc_bypass_*.kpm
+          retention-days: 90
+
+      - name: Upload release
+        if: github.event.inputs.release == 'true' && success() && !cancelled()
+        uses: ncipollo/release-action@v1.14.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: v${{ github.event.inputs.version }}
+          tag: v${{ github.event.inputs.version }}
+          body: "SELinux AVC Bypass KPM v${{ github.event.inputs.version }}"
+          artifacts: "selinux_avc_bypass_*.kpm"
+          allowUpdates: true
+          makeLatest: true
+          omitBodyDuringUpdate: true
+          replacesArtifacts: true
