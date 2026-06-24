@@ -24,19 +24,26 @@ jobs:
       contents: write
     env:
       TZ: UTC-8
+      KP_VERSION: 0.11.2
 
     steps:
-      - name: Checkout with submodules
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          fetch-depth: 1
 
       - name: Set up Android NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
           ndk-version: r27b
+
+      - name: Download KernelPatch SDK
+        run: |
+          wget -q "https://github.com/bmax121/KernelPatch/archive/refs/tags/${KP_VERSION}.tar.gz" -O kp.tar.gz
+          mkdir -p KernelPatch
+          tar xzf kp.tar.gz --strip-components=1 -C KernelPatch
+          rm kp.tar.gz
+          ls -la KernelPatch/kernel/include/
+          ls -la KernelPatch/kernel/linux/include/linux/ | head -20
 
       - name: Build KPM module
         env:
