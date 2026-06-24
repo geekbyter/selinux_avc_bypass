@@ -36,15 +36,21 @@ This approach is superior to userspace hooking because:
 
 ### GitHub Actions (Recommended)
 
-Push to GitHub and the workflow will automatically compile the KPM module.
-Download the `.kpm` file from the Actions artifacts.
+Push to GitHub and the workflow will automatically download KernelPatch SDK and compile
+the KPM module. Download the `.kpm` file from the Actions artifacts.
 
 ### Local Build
 
 ```bash
-# Clone with submodules
-git clone --recursive https://github.com/yourname/selinux_avc_bypass.git
+# Clone the repository
+git clone https://github.com/yourname/selinux_avc_bypass.git
 cd selinux_avc_bypass
+
+# Download KernelPatch SDK
+wget -q "https://github.com/bmax121/KernelPatch/archive/refs/tags/0.11.2.tar.gz" -O kp.tar.gz
+mkdir -p KernelPatch
+tar xzf kp.tar.gz --strip-components=1 -C KernelPatch
+rm kp.tar.gz
 
 # Set NDK path
 export ANDROID_NDK_HOME=/path/to/ndk
