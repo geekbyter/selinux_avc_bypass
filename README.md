@@ -3,6 +3,12 @@
 KPM (KernelPatch Module) that filters suspicious AVC audit records at the kernel level
 to bypass Duck Detector's "enforcing with audit exposure" detection.
 
+Author: geekbyte
+
+This directory supersedes `../audit_bypass_kpm`. The old directory used the same
+kernel `audit_log_end()` filtering logic under the `audit_exposure_bypass` name;
+the maintained module name is now `selinux_avc_bypass`.
+
 ## How It Works
 
 Duck Detector reads `logcat -b events -s auditd:I` and checks for AVC records containing
@@ -34,10 +40,22 @@ This approach is superior to userspace hooking because:
 
 ## Build
 
+### Build Requirements
+
+- Android NDK with aarch64 clang.
+- KernelPatch SDK source tree.
+- Linux/WSL/GitHub Actions build environment with `make`, `curl` or `wget`, and
+  standard shell utilities.
+
 ### GitHub Actions (Recommended)
 
-Push to GitHub and the workflow will automatically download KernelPatch SDK and compile
-the KPM module. Download the `.kpm` file from the Actions artifacts.
+Push this directory as a repository root for the simplest setup. If you keep it
+as `selinux_avc_bypass` inside a larger repository, copy
+`.github/workflows/main.yml` to the repository root `.github/workflows/`
+directory; GitHub only discovers workflows from the repository root. The YAML
+itself supports both project layouts, downloads KernelPatch `0.11.2`, installs
+Android NDK `29.0.14206865`, and uploads `selinux_avc_bypass_1.0.0.kpm` as an
+artifact.
 
 ### Local Build
 
@@ -54,6 +72,9 @@ rm kp.tar.gz
 
 # Set NDK path
 export ANDROID_NDK_HOME=/path/to/ndk
+
+# Optional: use an existing KernelPatch checkout instead of ./KernelPatch
+# export KP_DIR=/path/to/KernelPatch
 
 # Build
 make
