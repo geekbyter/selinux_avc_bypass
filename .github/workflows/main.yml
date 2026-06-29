@@ -1,66 +1,133 @@
-name: Build SELinux AVC Bypass KPM
+name: Build SELinux AVC Bypass KPM and Autoload Module
 
 on:
-  push:
-    paths:
-      - ".github/workflows/build.yml"
-      - "**.c"
-      - "**.h"
   workflow_dispatch:
     inputs:
       release:
-        description: 'Push a new release'
+        description: "Push a new release"
         required: false
-        default: 'false'
+        default: "false"
       version:
-        description: 'Release version'
+        description: "Release version"
         required: false
-        default: '1.0.0'
+        default: "1.0.0"
+  push:
+    paths:
+      - ".github/workflows/main.yml"
+      - "**/*.c"
+      - "**/*.h"
+      - "Makefile"
+      - "autoload_module/**"
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     env:
-      TZ: UTC-8
-      KP_VERSION: 0.11.2
+      KERNELPATCH_REF: "0.11.2"
+      NDK_VERSION: "29.0.14206865"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Android NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r27b
+      - name: Resolve project directory
+        shell: bash
+        run: |
+          if [ -f Makefile ] && [ -f selinux_avc_bypass.c ]; then
+            echo "PROJECT_DIR=$PWD" >> "$GITHUB_ENV"
+          elif [ -d selinux_avc_bypass ]; then
+            echo "PROJECT_DIR=$PWD/selinux_avc_bypass" >> "$GITHUB_ENV"
+          else
+            echo "Cannot find selinux_avc_bypass project directory" >&2
+            exit 1
+          fi
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        shell: bash
+        run: sdkmanager "ndk;${NDK_VERSION}"
+
+      - name: Install packaging tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y file zip unzip
 
       - name: Download KernelPatch SDK
+        shell: bash
         run: |
-          wget -q "https://github.com/bmax121/KernelPatch/archive/refs/tags/${KP_VERSION}.tar.gz" -O kp.tar.gz
+          set -eux
+          curl -L "https://github.com/bmax121/KernelPatch/archive/refs/tags/${KERNELPATCH_REF}.tar.gz" -o KernelPatch.tar.gz
           mkdir -p KernelPatch
-          tar xzf kp.tar.gz --strip-components=1 -C KernelPatch
-          rm kp.tar.gz
-          ls -la KernelPatch/kernel/include/
-          ls -la KernelPatch/kernel/linux/include/linux/ | head -20
+          tar xzf KernelPatch.tar.gz --strip-components=1 -C KernelPatch
 
       - name: Build KPM module
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: make
-
-      - name: Verify build output
+        shell: bash
         run: |
-          file selinux_avc_bypass_*.kpm
-          ls -lh selinux_avc_bypass_*.kpm
+          set -eux
+          make -C "$PROJECT_DIR" \
+            KP_DIR="$GITHUB_WORKSPACE/KernelPatch" \
+            ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${NDK_VERSION}"
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p artifacts
+          KPM_FILE="$(ls -1 "$PROJECT_DIR"/selinux_avc_bypass_*.kpm | sort -V | tail -n 1)"
+          cp "$KPM_FILE" artifacts/
+          file artifacts/selinux_avc_bypass_*.kpm
+          ls -lh artifacts/selinux_avc_bypass_*.kpm
+
+      - name: Build autoload module zip
+        shell: bash
+        run: |
+          set -eux
+          KPM_FILE="$(ls -1 "$PROJECT_DIR"/selinux_avc_bypass_*.kpm | sort -V | tail -n 1)"
+          AUTOLOAD_DIR="$PROJECT_DIR/autoload_module"
+          STAGE_DIR="$GITHUB_WORKSPACE/artifacts/selinux_avc_bypass_autoload"
+
+          test -f "$AUTOLOAD_DIR/module.prop"
+          test -f "$AUTOLOAD_DIR/post-fs-data.sh"
+          test -f "$AUTOLOAD_DIR/service.sh"
+
+          rm -rf "$STAGE_DIR"
+          mkdir -p "$STAGE_DIR"
+          cp "$AUTOLOAD_DIR/module.prop" "$STAGE_DIR/module.prop"
+          cp "$AUTOLOAD_DIR/post-fs-data.sh" "$STAGE_DIR/post-fs-data.sh"
+          cp "$AUTOLOAD_DIR/service.sh" "$STAGE_DIR/service.sh"
+          cp "$KPM_FILE" "$STAGE_DIR/selinux_avc_bypass.kpm"
+
+          chmod 0644 "$STAGE_DIR/module.prop" "$STAGE_DIR/selinux_avc_bypass.kpm"
+          chmod 0755 "$STAGE_DIR/post-fs-data.sh" "$STAGE_DIR/service.sh"
+
+          (
+            cd "$STAGE_DIR"
+            zip -r "$GITHUB_WORKSPACE/artifacts/selinux_avc_bypass_autoload.zip" \
+              module.prop post-fs-data.sh service.sh selinux_avc_bypass.kpm
+          )
+
+          unzip -l "$GITHUB_WORKSPACE/artifacts/selinux_avc_bypass_autoload.zip"
+          sha256sum "$GITHUB_WORKSPACE"/artifacts/selinux_avc_bypass_*.kpm \
+                    "$GITHUB_WORKSPACE/artifacts/selinux_avc_bypass_autoload.zip" \
+            > "$GITHUB_WORKSPACE/artifacts/SHA256SUMS.txt"
+          cat "$GITHUB_WORKSPACE/artifacts/SHA256SUMS.txt"
 
       - name: Upload artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: selinux_avc_bypass_kpm
-          path: selinux_avc_bypass_*.kpm
+          name: selinux_avc_bypass
+          path: |
+            artifacts/selinux_avc_bypass_*.kpm
+            artifacts/selinux_avc_bypass_autoload.zip
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: error
           retention-days: 90
 
       - name: Upload release
@@ -70,8 +137,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           name: v${{ github.event.inputs.version }}
           tag: v${{ github.event.inputs.version }}
-          body: "SELinux AVC Bypass KPM v${{ github.event.inputs.version }}"
-          artifacts: "selinux_avc_bypass_*.kpm"
+          body: "SELinux AVC Bypass KPM and autoload module v${{ github.event.inputs.version }}"
+          artifacts: "artifacts/selinux_avc_bypass_*.kpm,artifacts/selinux_avc_bypass_autoload.zip,artifacts/SHA256SUMS.txt"
           allowUpdates: true
           makeLatest: true
           omitBodyDuringUpdate: true
