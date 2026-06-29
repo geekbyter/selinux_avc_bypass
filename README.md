@@ -1,103 +1,149 @@
-# SELinux AVC Bypass KPM
+# SELinux AVC Bypass KPM v4.1.2
 
-KPM (KernelPatch Module) that filters suspicious AVC audit records at the kernel level
-to bypass Duck Detector's "enforcing with audit exposure" detection.
+This KernelPatch module suppresses kernel audit records whose type is
+`AUDIT_AVC` (1400). It is intended for controlled testing on the owner's
+Android device.
 
-Author: geekbyte
+## v4.1.2 architecture
 
-This directory supersedes `../audit_bypass_kpm`. The old directory used the same
-kernel `audit_log_end()` filtering logic under the `audit_exposure_bypass` name;
-the maintained module name is now `selinux_avc_bypass`.
+v4 hooks:
 
-## How It Works
+```c
+audit_log_start(struct audit_context *ctx, gfp_t gfp_mask, int type)
+```
 
-Duck Detector reads `logcat -b events -s auditd:I` and checks for AVC records containing
-root tool signatures (su, magisk, /data/adb, etc.). This KPM hooks the kernel's
-`audit_log_end()` function to intercept AVC audit records before they reach logd's
-netlink socket, suppressing records that contain suspicious keywords.
+When `type == 1400`, the hook skips record allocation and returns `NULL`.
+Kernel callers already handle this normal result.
 
-This approach is superior to userspace hooking because:
-- Filters at the source (kernel audit subsystem)
-- Affects both logcat AND libselinux audit callback paths
-- No process injection required
-- Invisible to detection tools
+v4.1.2 also runs one best-effort helper clear of Android's `events` log buffer
+after the hook is installed:
 
-## Detection Vectors Bypassed
+```text
+/system/bin/logcat -b events -c
+```
 
-| Detection Layer | How Bypassed |
-|----------------|--------------|
-| Logcat events buffer | AVC records never reach logd |
-| Native JNI audit callback | libselinux callback never receives suspicious records |
-| AVC side-channel | No matching records in logcat vs native probe |
+This is intentionally only a helper attempt. On the tested Redmi Note 11T Pro,
+a kernel-spawned `logcat` returned success but did not actually clear logd's
+events buffer. Reliable stale-buffer cleanup is therefore handled by the
+included boot service module, which runs `logcat -b events -c` from a normal
+root shell after loading the KPM. It deliberately clears only the `events`
+buffer rather than all Android log buffers.
 
-## Filtered Keywords
+`call_usermodehelper` is resolved at runtime with `kallsyms_lookup_name` so
+the KPM does not require a KernelPatch-exported `kf_call_usermodehelper`
+import.
 
-### Process names (comm field)
-- su, magisk, magiskd, ksud, kernelsu, apatch, apd
+Unlike v3, v4.1.2 does not:
 
-### Path tokens
-- /su, /magisk, /data/adb, magiskd, ksud, kernelsu, apatch
+- read `audit_buffer` through a guessed offset;
+- read or modify private `sk_buff` fields;
+- branch on kernel version;
+- run `logcat -b all -c`;
+- use `unhook()` to remove a `hook_wrap()` hook.
+
+The result is not tied to Redmi Note 11T Pro's 5.10.236 structure layout.
+Loading fails cleanly if the target kernel does not expose
+`audit_log_start`.
+
+## Important tradeoff
+
+While enabled, all SELinux AVC audit diagnostics are suppressed. Other audit
+record types remain unchanged. Disable or unload the module when diagnosing
+SELinux policy.
 
 ## Build
 
-### Build Requirements
+Requirements:
 
-- Android NDK with aarch64 clang.
+- Android NDK with aarch64 clang;
 - KernelPatch SDK source tree.
-- Linux/WSL/GitHub Actions build environment with `make`, `curl` or `wget`, and
-  standard shell utilities.
-
-### GitHub Actions (Recommended)
-
-Push this directory as a repository root for the simplest setup. If you keep it
-as `selinux_avc_bypass` inside a larger repository, copy
-`.github/workflows/main.yml` to the repository root `.github/workflows/`
-directory; GitHub only discovers workflows from the repository root. The YAML
-itself supports both project layouts, downloads KernelPatch `0.11.2`, installs
-Android NDK `29.0.14206865`, and uploads `selinux_avc_bypass_1.0.0.kpm` as an
-artifact.
-
-### Local Build
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourname/selinux_avc_bypass.git
-cd selinux_avc_bypass
-
-# Download KernelPatch SDK
-wget -q "https://github.com/bmax121/KernelPatch/archive/refs/tags/0.11.2.tar.gz" -O kp.tar.gz
-mkdir -p KernelPatch
-tar xzf kp.tar.gz --strip-components=1 -C KernelPatch
-rm kp.tar.gz
-
-# Set NDK path
 export ANDROID_NDK_HOME=/path/to/ndk
-
-# Optional: use an existing KernelPatch checkout instead of ./KernelPatch
-# export KP_DIR=/path/to/KernelPatch
-
-# Build
+export KP_DIR=/path/to/KernelPatch
+make clean
 make
 ```
 
-Output: `selinux_avc_bypass_1.0.0.kpm`
+Output:
 
-## Install
-
-```bash
-# Load via KernelPatch
-kpm load selinux_avc_bypass_1.0.0.kpm
-
-# Check status
-kpm ctl selinux_avc_bypass status
+```text
+selinux_avc_bypass_4.1.2.kpm
 ```
 
-## Kernel Compatibility
+The workspace Makefile also detects
+`../_refs/selinux_hook/KernelPatch` when present.
 
-- GKI 5.15+ (kernel >= 5.14): Full support (primary target)
-- GKI 5.10 (kernel 5.10-5.13): Compatible with runtime struct detection
-- Older kernels: May need struct offset adjustment
+## Install and verify
 
-## Version
+Exact KernelPatch CLI verbs differ by manager version. For the `ksud` CLI
+used in this workspace:
 
-1.0.0
+```bash
+ksud kpm load /data/local/tmp/selinux_avc_bypass_4.1.2.kpm
+ksud kpm control selinux_avc_bypass status
+```
+
+Expected status contains:
+
+```text
+enabled=1 hook=1 type=1400 umh_clear=1/1 abi=audit_log_start/arg2 offset_free=1
+```
+
+On the tested SuKiSU/KernelPatch CLI, `ksud kpm control` prints only the
+numeric return code (`0`) to stdout. The formatted status is available in
+`dmesg` under `[selinux_avc_bypass] ctl:`.
+
+The KPM helper attempts to clear the existing `events` buffer once after
+loading. If you intentionally unload the module, trigger Duck Detector, and
+reload while testing, you can force the same synchronous helper attempt:
+
+```bash
+ksud kpm control selinux_avc_bypass clear
+```
+
+For reliable cleanup on this device, use the included autoload module:
+
+```text
+autoload_module/
+  module.prop
+  post-fs-data.sh  # load KPM as early as possible
+  service.sh       # confirm load and clear events from root shell
+```
+
+The root-shell clear is required for late-load verification because a kernel
+hook can only stop new records; it cannot remove records already held by logd.
+
+Then trigger a known denied SELinux access and verify:
+
+```bash
+logcat -d -b events -v brief -s auditd:I '*:S' -t 120
+```
+
+No new canonical `type=1400 ... avc: denied ...` line should appear, and the
+module's `suppressed` counter should increase.
+
+## Controls
+
+```text
+status   show hook state and counters
+enable   suppress AUDIT_AVC records
+disable  restore AVC auditing without unloading
+reset    reset counters
+clear    synchronously run the best-effort UMH events-clear helper
+enable-clear  enable suppression and run the UMH events-clear helper
+```
+
+## Compatibility boundary
+
+The module depends only on:
+
+- runtime symbol lookup for `audit_log_start`;
+- its stable three-argument calling convention;
+- the stable UAPI audit type value 1400;
+- runtime lookup of `call_usermodehelper` for optional stale-buffer cleanup;
+- Android's public `/system/bin/logcat -b events -c` command for stale-buffer
+  cleanup;
+- KernelPatch's `hook_wrap3`/`hook_unwrap` API.
+
+It contains no special case for kernel 5.10.236.

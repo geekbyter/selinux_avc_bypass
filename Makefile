@@ -1,7 +1,14 @@
-SELINUX_AVC_BYPASS_VERSION := 1.0.0
+SELINUX_AVC_BYPASS_VERSION := 4.1.2
 
 ifndef KP_DIR
     KP_DIR = ./KernelPatch
+endif
+
+# Workspace fallback; external builds can still override KP_DIR explicitly.
+ifeq ($(wildcard $(KP_DIR)/kernel/include/kpmodule.h),)
+ifneq ($(wildcard ../_refs/selinux_hook/KernelPatch/kernel/include/kpmodule.h),)
+    KP_DIR := ../_refs/selinux_hook/KernelPatch
+endif
 endif
 
 OS_NAME = $(shell uname | tr A-Z a-z)
@@ -23,7 +30,7 @@ else ifdef NDK_PATH
     LD := $(NDK_PATH)/ld.lld
 endif
 
-CFLAGS = -Wall -O2 -fno-PIC -fno-asynchronous-unwind-tables -fno-stack-protector -fno-common -DSELINUX_AVC_BYPASS_VERSION=\"$(SELINUX_AVC_BYPASS_VERSION)\"
+CFLAGS = -Wall -Wextra -Werror -Wno-typedef-redefinition -O2 -fno-PIC -fno-asynchronous-unwind-tables -fno-stack-protector -fno-common -DSELINUX_AVC_BYPASS_VERSION=\"$(SELINUX_AVC_BYPASS_VERSION)\"
 CFLAGS += -std=gnu99
 
 INCLUDE_DIRS := . include patch/include linux linux/include linux/security/selinux/include linux/arch/arm64/include linux/tools/arch/arm64/include

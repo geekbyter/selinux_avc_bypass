@@ -1,0 +1,7 @@
+id=selinux_avc_bypass_autoload
+name=SELinux AVC Bypass Autoload
+version=v1.0.1
+versionCode=10001
+author=geekbyte
+description=Loads selinux_avc_bypass KPM early and clears Android events buffer after logd is available.
+updateJson=
