@@ -4,6 +4,40 @@ This KernelPatch module suppresses kernel audit records whose type is
 `AUDIT_AVC` (1400). It is intended for controlled testing on the owner's
 Android device.
 
+
+
+----
+
+# test this mudules + kpm file
+
+
+## before:
+<img width="480" height="1070" alt="image" src="https://github.com/user-attachments/assets/3da7268d-7f41-4bda-b2ab-0dae70d6c4b4" />
+
+
+## flash this mudules  `selinux_avc_bypass_autoload.zip`
+
+<img width="475" height="1001" alt="image" src="https://github.com/user-attachments/assets/d37682af-1d00-4fbd-a148-6db7875f0573" />
+
+
+
+`selinux_avc_bypass_autoload.zip` has already automatically loaded the kpm file, so you do not need to manually load `selinux_avc_bypass.kpm`.
+
+
+`selinux avc bypass_autoload.zip` automatically clears old AVC logs and loads `selinux avc bypass.kpm`, while `selinux avc bypass.kpm` handles the clearing of subsequently generated AVC logs.
+
+## after:
+
+<img width="460" height="760" alt="image" src="https://github.com/user-attachments/assets/52384d2e-fbed-485a-93a1-71e2415f6ac0" />
+
+<img width="485" height="709" alt="image" src="https://github.com/user-attachments/assets/d7c51c11-828f-4a65-a4cd-d365b3945038" />
+
+<img width="443" height="1040" alt="image" src="https://github.com/user-attachments/assets/b7c28971-cded-406f-8d45-61e7206f0b98" />
+
+
+----
+
+
 ## v4.1.2 architecture
 
 v4 hooks:
